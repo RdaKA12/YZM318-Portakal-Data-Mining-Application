@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import hashlib
 import io
+import os
 import re
 import subprocess
+import sys
 import tempfile
+from shutil import which
 from datetime import datetime
 from pathlib import Path
 
@@ -102,26 +105,84 @@ class FileImportService:
             cache_path=cache_path,
         )
 
-    def load_from_url(self, url: str) -> DatasetHandle:
+    def load_from_url(
+        self,
+        url: str,
+        *,
+        kaggle_username: str | None = None,
+        kaggle_key: str | None = None,
+    ) -> DatasetHandle:
+        if re.search(r"kaggle\.com/code/[^/]+/[^/?#]+", url):
+            raise DatasetLoadError(
+                "Kaggle notebook/code URLs are not supported. Use a dataset URL in the form https://www.kaggle.com/datasets/<owner>/<dataset-name>."
+            )
+
         kaggle_match = re.search(r"kaggle\.com/datasets/([^/]+/[^/]+)", url)
         if not kaggle_match:
-            raise DatasetLoadError(f"Direct URL downloading is only supported for Kaggle dataset URLs currently.")
+            raise DatasetLoadError(
+                "Only Kaggle dataset URLs are supported. Use a URL in the form https://www.kaggle.com/datasets/<owner>/<dataset-name>."
+            )
+
+        manual_username = (kaggle_username or "").strip()
+        manual_key = (kaggle_key or "").strip()
+        if bool(manual_username) != bool(manual_key):
+            raise DatasetLoadError("Enter both Kaggle username and API key, or leave both empty.")
+        command_env = None
+        if manual_username and manual_key:
+            command_env = os.environ.copy()
+            command_env["KAGGLE_USERNAME"] = manual_username
+            command_env["KAGGLE_KEY"] = manual_key
         
         dataset_id = kaggle_match.group(1).split("?")[0]
         download_dir = Path(tempfile.gettempdir()) / "portakal-kaggle" / dataset_id.replace("/", "_")
         download_dir.mkdir(parents=True, exist_ok=True)
-        
+
+        kaggle_cli_candidates: list[str] = []
+        path_candidate = which("kaggle")
+        if path_candidate:
+            kaggle_cli_candidates.append(path_candidate)
+        for name in ("kaggle.exe", "kaggle"):
+            sibling = Path(sys.executable).with_name(name)
+            if sibling.exists():
+                sibling_text = str(sibling)
+                if sibling_text not in kaggle_cli_candidates:
+                    kaggle_cli_candidates.append(sibling_text)
+        if not kaggle_cli_candidates:
+            kaggle_cli_candidates.append("kaggle")
+
+        commands = [
+            [cli_path, "datasets", "download", "-d", dataset_id, "-p", str(download_dir), "--unzip"]
+            for cli_path in kaggle_cli_candidates
+        ]
+
+        command_missing = False
         try:
-            subprocess.run(
-                ["kaggle", "datasets", "download", "-d", dataset_id, "-p", str(download_dir), "--unzip"],
-                capture_output=True,
-                text=True,
-                check=True
+            for command in commands:
+                try:
+                    subprocess.run(command, capture_output=True, text=True, check=True, env=command_env)
+                    command_missing = False
+                    break
+                except FileNotFoundError:
+                    command_missing = True
+                    continue
+                except subprocess.CalledProcessError as exc:
+                    stderr = (exc.stderr or "").strip()
+                    stdout = (exc.stdout or "").strip()
+                    message = stderr or stdout or str(exc)
+                    raise DatasetLoadError(
+                        f"Failed to download Kaggle dataset '{dataset_id}'. "
+                        f"Ensure Kaggle credentials are configured (kaggle.json or environment variables). Error: {message}"
+                    ) from exc
+            else:
+                command_missing = True
+        except DatasetLoadError:
+            raise
+
+        if command_missing:
+            raise DatasetLoadError(
+                "Failed to download Kaggle dataset because Kaggle CLI is unavailable. "
+                "Install Kaggle CLI (`pip install kaggle`) and configure credentials."
             )
-        except Exception as e:
-            output = getattr(e, "output", str(e))
-            stderr = getattr(e, "stderr", "")
-            raise DatasetLoadError(f"Failed to download Kaggle dataset '{dataset_id}'. Ensure 'kaggle' CLI is installed and configured. Error: {output} {stderr}") from e
             
         candidates = list(download_dir.glob("**/*.csv")) + list(download_dir.glob("**/*.parquet")) + list(download_dir.glob("**/*.xlsx"))
         if not candidates:

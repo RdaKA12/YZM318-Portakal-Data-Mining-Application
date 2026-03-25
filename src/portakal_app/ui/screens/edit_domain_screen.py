@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
 from portakal_app.data.models import DatasetHandle, DomainColumnEdit, DomainEditRequest
 from portakal_app.data.services.domain_transform_service import DomainTransformService
 from portakal_app.data.services.file_import_service import FileImportService
+from portakal_app.ui import i18n
 from portakal_app.ui.screens.file_screen import RoleCellWidget, TypeCellWidget
 from portakal_app.ui.screens.node_screen import WorkflowNodeScreenSupport
 
@@ -74,7 +75,7 @@ class EditDomainScreen(QWidget, WorkflowNodeScreenSupport):
 
         footer.addStretch(1)
 
-        self._auto_send_checkbox = QCheckBox("Apply Automatically")
+        self._auto_send_checkbox = QCheckBox("Send Automatically")
         self._auto_send_checkbox.setChecked(False)
         footer.addWidget(self._auto_send_checkbox)
 
@@ -100,9 +101,12 @@ class EditDomainScreen(QWidget, WorkflowNodeScreenSupport):
         if dataset_handle is None:
             self._set_empty_state()
             return
-        self._dataset_label.setText(f"Dataset: {dataset_handle.source.path.name}")
+        self._dataset_label.setText(i18n.tf("Dataset: {name}", name=dataset_handle.source.path.name))
         self._summary_label.setText(
-            f"Editing domain for {dataset_handle.column_count} columns. Apply changes to update the workflow dataset."
+            i18n.tf(
+                "Editing domain for {count} columns. Apply changes to update the workflow dataset.",
+                count=dataset_handle.column_count,
+            )
         )
         self._change_summary_label.setText("")
         self._populate_from_request(self._domain_transform_service.build_request(dataset_handle))
@@ -212,7 +216,7 @@ class EditDomainScreen(QWidget, WorkflowNodeScreenSupport):
         try:
             updated_dataset = self._domain_transform_service.apply(self._dataset_handle, request)
         except ValueError as exc:
-            QMessageBox.warning(self, "Edit Domain", str(exc))
+            QMessageBox.warning(self, i18n.t("Edit Domain"), str(exc))
             return
         summary = self._domain_transform_service.summarize_changes(self._dataset_handle, request, updated_dataset)
         self._dataset_handle = updated_dataset
@@ -253,7 +257,21 @@ class EditDomainScreen(QWidget, WorkflowNodeScreenSupport):
             self._apply_changes()
 
     def _set_empty_state(self) -> None:
-        self._dataset_label.setText("Dataset: none")
-        self._summary_label.setText("Load a dataset to edit column names, types and roles.")
+        self._dataset_label.setText(i18n.t("Dataset: none"))
+        self._summary_label.setText(i18n.t("Load a dataset to edit column names, types and roles."))
         self._change_summary_label.setText("")
         self._columns_table.setRowCount(0)
+
+    def refresh_translations(self) -> None:
+        if self._dataset_handle is None:
+            self._dataset_label.setText(i18n.t("Dataset: none"))
+            self._summary_label.setText(i18n.t("Load a dataset to edit column names, types and roles."))
+            self._change_summary_label.setText("")
+            return
+        self._dataset_label.setText(i18n.tf("Dataset: {name}", name=self._dataset_handle.source.path.name))
+        self._summary_label.setText(
+            i18n.tf(
+                "Editing domain for {count} columns. Apply changes to update the workflow dataset.",
+                count=self._dataset_handle.column_count,
+            )
+        )

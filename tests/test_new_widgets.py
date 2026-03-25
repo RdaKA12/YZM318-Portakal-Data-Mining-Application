@@ -8,6 +8,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 pytest.importorskip("PySide6")
 
+from PySide6.QtCore import Qt
 from PySide6.QtTest import QTest
 
 from portakal_app.app import create_application
@@ -58,6 +59,91 @@ def test_paint_data_screen_loads_points_from_dataset_and_emits_dataset(app, samp
     assert emitted.row_count == sample_dataset.row_count
     assert emitted.column_count == 3
     assert emitted.display_name == "Painted Data"
+
+
+def test_paint_data_screen_variable_names_change_emitted_column_names(app, sample_dataset):
+    screen = PaintDataScreen()
+    screen.set_dataset(sample_dataset)
+
+    screen._x_name_input.setText("feature_x")
+    screen._y_name_input.setText("feature_y")
+    screen._emit_dataset()
+
+    emitted = screen.current_output_dataset()
+    assert emitted is not None
+    assert emitted.dataframe.columns == ["feature_x", "feature_y", "label"]
+    assert screen._canvas._x_axis_label == "feature_x"
+    assert screen._canvas._y_axis_label == "feature_y"
+
+
+def test_paint_data_screen_source_column_change_rebuilds_graph_and_preserves_custom_output_names(app, tmp_path):
+    path = tmp_path / "paint-columns.csv"
+    path.write_text(
+        "axis_a,axis_b,axis_c,label\n"
+        "1,10,100,A\n"
+        "2,20,100,A\n"
+        "3,30,300,B\n",
+        encoding="utf-8",
+    )
+    dataset = FileImportService().load(str(path))
+
+    screen = PaintDataScreen()
+    screen.set_dataset(dataset)
+    screen._x_name_input.setText("feature_x")
+    screen._y_name_input.setText("feature_y")
+
+    screen._x_source_combo.setCurrentText("axis_c")
+
+    snapshot = screen._current_snapshot()
+    assert snapshot.x_source_name == "axis_c"
+    assert snapshot.y_source_name == "axis_b"
+    assert snapshot.x_name == "feature_x"
+    assert snapshot.y_name == "feature_y"
+    assert [point.x for point in snapshot.points] == [0.0, 0.0, 1.0]
+    assert [point.y for point in snapshot.points] == [0.0, 0.5, 1.0]
+    assert snapshot.labels == ("A", "B")
+    assert screen._canvas._x_axis_label == "feature_x"
+    assert screen._canvas._y_axis_label == "feature_y"
+
+    screen._emit_dataset()
+    emitted = screen.current_output_dataset()
+    assert emitted is not None
+    assert emitted.dataframe.columns == ["feature_x", "feature_y", "label"]
+    assert emitted.dataframe["feature_x"].to_list() == [0.0, 0.0, 1.0]
+    assert emitted.dataframe["feature_y"].to_list() == [0.0, 0.5, 1.0]
+
+
+def test_paint_data_screen_typing_existing_column_name_rebuilds_graph(app, tmp_path):
+    path = tmp_path / "paint-typed-columns.csv"
+    path.write_text(
+        "axis_a,axis_b,axis_c,label\n"
+        "1,10,100,A\n"
+        "2,20,100,A\n"
+        "3,30,300,B\n",
+        encoding="utf-8",
+    )
+    dataset = FileImportService().load(str(path))
+
+    screen = PaintDataScreen()
+    screen.set_dataset(dataset)
+
+    screen._x_name_input.setText("axis_c")
+    screen._y_name_input.setText("axis_b")
+
+    snapshot = screen._current_snapshot()
+    assert snapshot.x_source_name == "axis_c"
+    assert snapshot.y_source_name == "axis_b"
+    assert snapshot.x_name == "axis_c"
+    assert snapshot.y_name == "axis_b"
+    assert [point.x for point in snapshot.points] == [0.0, 0.0, 1.0]
+    assert [point.y for point in snapshot.points] == [0.0, 0.5, 1.0]
+
+
+def test_paint_data_screen_wraps_sidebar_in_scroll_area(app):
+    screen = PaintDataScreen()
+
+    assert screen._sidebar_scroll.widget() is screen._sidebar
+    assert screen._sidebar_scroll.horizontalScrollBarPolicy() == Qt.ScrollBarPolicy.ScrollBarAlwaysOff
 
 
 def test_paint_data_screen_keeps_selected_label_after_own_output_round_trip(app, sample_dataset):
@@ -132,6 +218,33 @@ def test_main_window_opens_new_active_widgets(app):
     window._show_widget("color")
     assert isinstance(window._workspace.current_widget(), ColorScreen)
     assert window._widget_index["color"].enabled is True
+
+
+def test_file_widget_column_edits_flow_to_downstream_data_table(app, tmp_path):
+    path = tmp_path / "edited.csv"
+    path.write_text("a,b,c\n1,2,x\n3,4,y\n", encoding="utf-8")
+
+    window = MainWindow()
+    canvas = window._workspace.canvas
+    scene = canvas.workflow_scene
+    source = canvas.add_workflow_node("file")
+    target = canvas.add_workflow_node("data-table")
+    assert scene.create_connection(source.node_id, target.node_id)
+
+    window._handle_file_selected(str(path))
+    file_screen = window._node_runtimes[source.node_id].screen
+    data_table = window._node_runtimes[target.node_id].screen
+
+    file_screen._columns_table.item(0, 0).setText("amount")
+    file_screen._columns_table.cellWidget(2, 2).setCurrentText("meta")
+    file_screen._handle_apply_clicked()
+
+    assert data_table._headers == ["amount", "b", "c"]
+    assert [(column.name, column.role) for column in data_table._dataset_handle.domain.columns] == [
+        ("amount", "feature"),
+        ("b", "feature"),
+        ("c", "meta"),
+    ]
 
 
 def test_disconnected_input_widget_clears_dataset(app, tmp_path):

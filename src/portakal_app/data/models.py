@@ -206,6 +206,9 @@ class PaintDataSnapshot:
     labels: tuple[str, ...] = ("C1", "C2")
     points: tuple[PaintDataPoint, ...] = ()
     source_name: str = "Painted Data"
+    x_source_name: str | None = None
+    y_source_name: str | None = None
+    label_source_name: str | None = None
 
 
 def build_data_domain(dataframe: pl.DataFrame) -> DataDomain:
@@ -250,7 +253,7 @@ def _infer_target_index(columns: list[ColumnSchema]) -> int | None:
     candidates = [
         index
         for index, column in enumerate(columns)
-        if column.logical_type != "numeric" and 0 < column.unique_count_hint <= LOW_CARDINALITY_LIMIT
+        if column.name.strip() and column.logical_type != "numeric" and 0 < column.unique_count_hint <= LOW_CARDINALITY_LIMIT
     ]
     if not candidates:
         return None

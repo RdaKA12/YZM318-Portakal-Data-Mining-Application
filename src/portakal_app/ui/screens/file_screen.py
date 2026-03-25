@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QGroupBox,
     QHBoxLayout,
+    QLineEdit,
     QLabel,
     QPushButton,
     QCheckBox,
@@ -24,6 +25,7 @@ from PySide6.QtWidgets import (
 from portakal_app.data.models import ColumnSchema, DatasetHandle, DomainEditRequest, DomainColumnEdit
 from portakal_app.data.services.domain_transform_service import DomainTransformService
 from portakal_app.data.services.file_import_service import FileImportService
+from portakal_app.ui import i18n
 from portakal_app.ui.icons import get_toolbar_icon
 from portakal_app.ui.screens.node_screen import WorkflowNodeScreenSupport
 
@@ -146,7 +148,7 @@ class FileScreen(QWidget, WorkflowNodeScreenSupport):
         self._domain_transform_service = DomainTransformService()
         self._set_source_mode("file")
         self._set_info_placeholder()
-        self._set_columns(self._placeholder_columns())
+        self._set_columns([])
         self._update_buttons()
 
     def eventFilter(self, watched: QObject, event: QEvent) -> bool:  # type: ignore[name-defined]
@@ -208,6 +210,29 @@ class FileScreen(QWidget, WorkflowNodeScreenSupport):
         self._url_combo.lineEdit().installEventFilter(self)
         url_row.addWidget(self._url_combo, 1)
         layout.addLayout(url_row)
+
+        kaggle_user_row = QHBoxLayout()
+        kaggle_user_row.setSpacing(8)
+        self._kaggle_user_label = QLabel("Kaggle User:")
+        kaggle_user_row.addWidget(self._kaggle_user_label)
+
+        self._kaggle_username_input = QLineEdit()
+        self._kaggle_username_input.setPlaceholderText("Optional: your Kaggle username")
+        self._kaggle_username_input.textChanged.connect(lambda _text: self._mark_dirty())
+        kaggle_user_row.addWidget(self._kaggle_username_input, 1)
+        layout.addLayout(kaggle_user_row)
+
+        kaggle_key_row = QHBoxLayout()
+        kaggle_key_row.setSpacing(8)
+        self._kaggle_key_label = QLabel("Kaggle API Key:")
+        kaggle_key_row.addWidget(self._kaggle_key_label)
+
+        self._kaggle_key_input = QLineEdit()
+        self._kaggle_key_input.setEchoMode(QLineEdit.EchoMode.Password)
+        self._kaggle_key_input.setPlaceholderText("Optional: paste Kaggle API key")
+        self._kaggle_key_input.textChanged.connect(lambda _text: self._mark_dirty())
+        kaggle_key_row.addWidget(self._kaggle_key_input, 1)
+        layout.addLayout(kaggle_key_row)
         return group
 
     def _build_file_type_group(self) -> QGroupBox:
@@ -305,7 +330,7 @@ class FileScreen(QWidget, WorkflowNodeScreenSupport):
             self._selected_path = None
             self._file_combo.setEditText("")
             self._set_info_placeholder()
-            self._set_columns(self._placeholder_columns())
+            self._set_columns([])
             self._sample_headers = []
             self._sample_rows = []
             self._row_count_hint = None
@@ -329,7 +354,7 @@ class FileScreen(QWidget, WorkflowNodeScreenSupport):
             self._output_dataset = self._dataset_handle
         else:
             self._set_info_placeholder()
-            self._set_columns(self._placeholder_columns())
+            self._set_columns([])
             self._output_dataset = None
         self._dirty = False
         self._update_buttons()
@@ -343,18 +368,22 @@ class FileScreen(QWidget, WorkflowNodeScreenSupport):
             self._url_radio.setChecked(True)
             self._ensure_combo_value(self._url_combo, url)
             try:
-                self._dataset_handle = self._import_service.load_from_url(url)
+                self._dataset_handle = self._import_service.load_from_url(
+                    url,
+                    kaggle_username=self._kaggle_username_input.text().strip() or None,
+                    kaggle_key=self._kaggle_key_input.text().strip() or None,
+                )
                 self._populate_from_handle(self._dataset_handle)
                 self._output_dataset = self._dataset_handle
             except Exception as e:
                 self._set_info_placeholder()
-                self._dataset_title.setText("Error loading URL")
-                self._dataset_description.setText(str(e)[:100])
-                self._set_columns(self._placeholder_columns())
+                self._dataset_title.setText(i18n.t("Error loading URL"))
+                self._dataset_description.setText(i18n.t(str(e)))
+                self._set_columns([])
         else:
             self._url_combo.setEditText("")
             self._set_info_placeholder()
-            self._set_columns(self._placeholder_columns())
+            self._set_columns([])
             
         self._dirty = False
         self._update_buttons()
@@ -454,16 +483,18 @@ class FileScreen(QWidget, WorkflowNodeScreenSupport):
         if self._url_radio.isChecked():
             self._mark_dirty()
 
-    def _mark_dirty(self) -> None:
-        self._dirty = True
-        self._update_buttons()
-        if hasattr(self, "_auto_send_checkbox") and self._auto_send_checkbox.isChecked():
-            self._handle_apply_clicked()
-
     def _set_source_mode(self, mode: str) -> None:
         file_mode = mode == "file"
+        url_mode = mode == "url"
         self._browse_button.setEnabled(file_mode)
         self._reload_button.setEnabled(bool(self.current_source_value()))
+        for widget in (
+            self._kaggle_user_label,
+            self._kaggle_username_input,
+            self._kaggle_key_label,
+            self._kaggle_key_input,
+        ):
+            widget.setVisible(url_mode)
         self._update_buttons()
 
     def _handle_open_clicked(self) -> None:
@@ -498,19 +529,25 @@ class FileScreen(QWidget, WorkflowNodeScreenSupport):
     def _handle_apply_clicked(self) -> None:
         source = self.current_source_value()
         if not source:
+            self._dataset_title.setText(i18n.t("No dataset selected"))
+            self._dataset_description.setText(i18n.t("Select a file path or URL before applying."))
             return
 
         if self._file_radio.isChecked() and source != self._selected_path:
             self.set_selected_file(source)
-        elif self._url_radio.isChecked() and source != self._selected_url:
+        elif self._url_radio.isChecked():
+            # Re-load URL source on each apply so updated credential fields take effect.
             self.set_remote_url(source)
 
         if self._dataset_handle is not None:
             request = self._build_domain_request()
             try:
                 self._output_dataset = self._domain_transform_service.apply(self._dataset_handle, request)
-            except Exception:
-                self._output_dataset = self._dataset_handle
+            except Exception as exc:
+                self._dataset_title.setText(i18n.t("Apply failed"))
+                self._dataset_description.setText(str(exc))
+                self._update_buttons()
+                return
 
         callbacks = self._apply_callbacks
         if self._url_radio.isChecked():
@@ -521,6 +558,7 @@ class FileScreen(QWidget, WorkflowNodeScreenSupport):
 
         self._dirty = False
         self._update_buttons()
+        self._notify_output_changed()
 
     def _build_domain_request(self) -> DomainEditRequest:
         if self._dataset_handle is None:
@@ -554,7 +592,7 @@ class FileScreen(QWidget, WorkflowNodeScreenSupport):
         self._url_combo.setEditText("")
         self._file_type_combo.setCurrentIndex(0)
         self._set_info_placeholder()
-        self._set_columns(self._placeholder_columns())
+        self._set_columns([])
         self._dirty = False
         self._update_buttons()
 
@@ -565,19 +603,19 @@ class FileScreen(QWidget, WorkflowNodeScreenSupport):
             return None
 
     def _populate_from_handle(self, dataset: DatasetHandle) -> None:
-        self._dataset_title.setText(dataset.display_name or "Dataset")
-        self._dataset_description.setText("Local file source")
+        self._dataset_title.setText(dataset.display_name or i18n.t("Dataset"))
+        self._dataset_description.setText(i18n.t("Local file source"))
         self._sync_file_type_from_extension(dataset.source.path.suffix.lower())
 
         self._sample_headers = list(dataset.dataframe.columns)
         self._sample_rows = self._rows_as_text(dataset.dataframe.head(12))
         self._row_count_hint = dataset.row_count
         metrics = [
-            f"Source path: {dataset.source.path}",
-            f"Detected extension: {dataset.source.path.suffix.lower() or 'unknown'}",
-            f"{dataset.column_count} columns discovered",
-            f"{dataset.row_count} rows detected",
-            f"Cache file: {dataset.cache_path.name}",
+            f"{i18n.t('Source path')}: {dataset.source.path}",
+            f"{i18n.t('Detected extension')}: {dataset.source.path.suffix.lower() or i18n.t('unknown')}",
+            f"{dataset.column_count} {i18n.t('columns discovered')}",
+            f"{dataset.row_count} {i18n.t('rows detected')}",
+            f"{i18n.t('Cache file')}: {dataset.cache_path.name}",
         ]
         self._dataset_metrics.setText("\n".join(metrics))
         self._set_columns(self._columns_from_domain(dataset))
@@ -598,9 +636,10 @@ class FileScreen(QWidget, WorkflowNodeScreenSupport):
         )
 
     def _full_table_from_current_source(self) -> tuple[list[str], list[list[str]]]:
-        if self._dataset_handle is None:
+        dataset = self._output_dataset or self._dataset_handle
+        if dataset is None:
             return self._sample_headers, self._sample_rows
-        return list(self._dataset_handle.dataframe.columns), self._rows_as_text(self._dataset_handle.dataframe)
+        return list(dataset.dataframe.columns), self._rows_as_text(dataset.dataframe)
 
     def _rows_as_text(self, dataframe) -> list[list[str]]:
         return [[self._cell_to_text(value) for value in row] for row in dataframe.rows()]
@@ -622,25 +661,16 @@ class FileScreen(QWidget, WorkflowNodeScreenSupport):
         self._file_type_combo.setCurrentIndex(mapping.get(suffix, 0))
 
     def _set_info_placeholder(self) -> None:
-        self._dataset_title.setText("No dataset selected")
-        self._dataset_description.setText("Choose a local file or URL to inspect metadata.")
+        self._dataset_title.setText(i18n.t("No dataset selected"))
+        self._dataset_description.setText(i18n.t("Choose a local file or URL to inspect metadata."))
         self._dataset_metrics.setText(
             "\n".join(
                 [
-                    "No source selected yet.",
-                    "Use Browse, Reload and Apply after the data backend is connected.",
+                    i18n.t("No source selected yet."),
+                    i18n.t("Use Browse, Reload and Apply after the data backend is connected."),
                 ]
             )
         )
-
-    def _placeholder_columns(self) -> list[FileColumnSpec]:
-        return [
-            FileColumnSpec("sepal length", "numeric", "feature", ""),
-            FileColumnSpec("sepal width", "numeric", "feature", ""),
-            FileColumnSpec("petal length", "numeric", "feature", ""),
-            FileColumnSpec("petal width", "numeric", "feature", ""),
-            FileColumnSpec("iris", "categorical", "target", "Iris-setosa, Iris-versicolor, Iris-virginica"),
-        ]
 
     def _set_columns(self, columns: list[FileColumnSpec]) -> None:
         self._column_specs = [FileColumnSpec(spec.name, spec.type_name, spec.role_name, spec.values_preview) for spec in columns]
@@ -665,6 +695,7 @@ class FileScreen(QWidget, WorkflowNodeScreenSupport):
 
         self._columns_table.blockSignals(False)
         self._columns_table.resizeColumnsToContents()
+        self._columns_table.setEnabled(bool(columns))
 
     def _handle_type_changed(self, row: int, type_name: str) -> None:
         self._column_specs[row].type_name = type_name
@@ -690,6 +721,8 @@ class FileScreen(QWidget, WorkflowNodeScreenSupport):
     def _mark_dirty(self) -> None:
         self._dirty = True
         self._update_buttons()
+        if hasattr(self, "_auto_send_checkbox") and self._auto_send_checkbox.isChecked():
+            self._handle_apply_clicked()
 
     def _update_buttons(self) -> None:
         has_source = bool(self.current_source_value())

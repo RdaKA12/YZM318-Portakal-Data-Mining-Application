@@ -10,12 +10,14 @@ import httpx
 from portakal_app.data.errors import LLMConfigurationError, LLMRequestError, LLMResponseError
 from portakal_app.data.models import AnalysisSuggestion, DatasetSummary
 from portakal_app.models import LLMSessionConfig
+from portakal_app.ui import i18n
 
 
-SYSTEM_PROMPT = (
+SYSTEM_PROMPT_TEMPLATE = (
     "You are Portakal's AI data analysis assistant. "
     "Inspect the dataset summary and produce concise risks and suggestions for data quality, "
     "model readiness, suspicious schema patterns, missing data issues, leakage risks, and next-step actions. "
+    "Write all natural language text in {language_name}. "
     "Return valid JSON only with keys 'risks' and 'suggestions'. "
     "Each list item must contain 'title', 'body', and 'severity'. "
     "Allowed severity values: low, medium, high. "
@@ -56,6 +58,7 @@ class LLMAnalyzer:
         raise LLMConfigurationError(f"Unsupported LLM provider: {config.provider}")
 
     def _request_openai_compatible(self, context: str, config: LLMSessionConfig) -> str:
+        system_prompt = self._system_prompt()
         response = self._post_json(
             f"{config.base_url.rstrip('/')}/chat/completions",
             headers={
@@ -66,7 +69,7 @@ class LLMAnalyzer:
                 "model": config.model,
                 "temperature": 0.2,
                 "messages": [
-                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "system", "content": system_prompt},
                     {"role": "user", "content": context},
                 ],
             },
@@ -82,6 +85,7 @@ class LLMAnalyzer:
         return text
 
     def _request_claude(self, context: str, config: LLMSessionConfig) -> str:
+        system_prompt = self._system_prompt()
         response = self._post_json(
             f"{config.base_url.rstrip('/')}/v1/messages",
             headers={
@@ -92,7 +96,7 @@ class LLMAnalyzer:
             json_body={
                 "model": config.model,
                 "max_tokens": 900,
-                "system": SYSTEM_PROMPT,
+                "system": system_prompt,
                 "messages": [{"role": "user", "content": context}],
             },
         )
@@ -106,6 +110,7 @@ class LLMAnalyzer:
         return text
 
     def _request_gemini(self, context: str, config: LLMSessionConfig) -> str:
+        system_prompt = self._system_prompt()
         response = self._post_json(
             f"{config.base_url.rstrip('/')}/models/{quote(config.model, safe='')}:generateContent",
             headers={"Content-Type": "application/json"},
@@ -115,7 +120,7 @@ class LLMAnalyzer:
                     {
                         "parts": [
                             {
-                                "text": f"{SYSTEM_PROMPT}\n\nDataset summary:\n{context}",
+                                "text": f"{system_prompt}\n\nDataset summary:\n{context}",
                             }
                         ]
                     }
@@ -137,6 +142,7 @@ class LLMAnalyzer:
         return text
 
     def _request_ollama(self, context: str, config: LLMSessionConfig) -> str:
+        system_prompt = self._system_prompt()
         response = self._post_json(
             f"{config.base_url.rstrip('/')}/api/chat",
             headers={"Content-Type": "application/json"},
@@ -144,7 +150,7 @@ class LLMAnalyzer:
                 "model": config.model,
                 "stream": False,
                 "messages": [
-                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "system", "content": system_prompt},
                     {"role": "user", "content": context},
                 ],
             },
@@ -184,6 +190,10 @@ class LLMAnalyzer:
         if response.status_code >= 400:
             raise LLMRequestError(self._error_message_from_payload(payload, response.status_code))
         return payload
+
+    def _system_prompt(self) -> str:
+        language_name = "Turkish" if i18n.current_language() == "tr" else "English"
+        return SYSTEM_PROMPT_TEMPLATE.format(language_name=language_name)
 
     def _error_message_from_payload(self, payload: dict[str, Any], status_code: int) -> str:
         error = payload.get("error")

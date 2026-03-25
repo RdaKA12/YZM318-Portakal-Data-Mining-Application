@@ -5,6 +5,7 @@ from PySide6.QtGui import QFontMetrics
 from PySide6.QtWidgets import QSizePolicy, QPushButton, QFrame, QListWidget, QListWidgetItem, QVBoxLayout, QWidget
 
 from portakal_app.models import CategoryDefinition
+from portakal_app.ui import i18n
 
 
 class SidebarCategoryList(QFrame):
@@ -29,20 +30,39 @@ class SidebarCategoryList(QFrame):
         self._list.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self._list.currentItemChanged.connect(self._emit_selected_category)
         layout.addWidget(self._list)
-
-        for category in self._categories:
-            item = QListWidgetItem(category.label)
-            item.setData(Qt.ItemDataRole.UserRole, category.id)
-            self._list.addItem(item)
-            self._items_by_category[category.id] = item
+        self._populate_list()
 
         layout.addStretch(1)
-        self._workflow_info_button = QPushButton("Workflow Info")
+        self._workflow_info_button = QPushButton(i18n.t("Workflow Info"))
         self._workflow_info_button.setObjectName("workflowInfoButton")
         self._workflow_info_button.clicked.connect(self.workflowInfoRequested.emit)
         layout.addWidget(self._workflow_info_button)
 
         self._sync_list_height()
+
+    def _populate_list(self, current_category_id: str | None = None) -> None:
+        current_category_id = current_category_id or self.current_category_id()
+        self._list.clear()
+        self._items_by_category.clear()
+        for category in self._categories:
+            item = QListWidgetItem(category.label)
+            item.setData(Qt.ItemDataRole.UserRole, category.id)
+            self._list.addItem(item)
+            self._items_by_category[category.id] = item
+        if current_category_id is not None:
+            self.set_current_category(current_category_id)
+        self._sync_list_height()
+
+    def set_categories(self, categories: list[CategoryDefinition]) -> None:
+        self._categories = categories
+        self._populate_list()
+
+    def refresh_translations(self) -> None:
+        self._workflow_info_button.setText(i18n.t("Workflow Info"))
+        for category in self._categories:
+            item = self._items_by_category.get(category.id)
+            if item is not None:
+                item.setText(category.label)
 
     def _emit_selected_category(self, current: QListWidgetItem | None, _previous: QListWidgetItem | None) -> None:
         if current is None:

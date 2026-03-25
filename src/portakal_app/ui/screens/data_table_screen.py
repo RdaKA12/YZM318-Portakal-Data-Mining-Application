@@ -29,6 +29,7 @@ from PySide6.QtWidgets import (
 from portakal_app.data.models import DatasetHandle, PreviewPage
 from portakal_app.data.services.generated_dataset_service import GeneratedDatasetService
 from portakal_app.data.services.preview_service import PreviewService
+from portakal_app.ui import i18n
 from portakal_app.ui.screens.node_screen import WorkflowNodeScreenSupport
 
 
@@ -292,14 +293,14 @@ class _LoadingWidget(QWidget):
         super().__init__(parent)
         layout = QVBoxLayout(self)
         layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._label = QLabel("⏳ Veriler yükleniyor...")
+        self._label = QLabel("Loading data...")
         self._label.setStyleSheet(
             "font-size: 14pt; font-weight: 600; color: #8b7355; background: transparent;"
         )
         self._label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(self._label)
 
-        self._detail = QLabel("Polars DataFrame hazırlanıyor, lütfen bekleyiniz.")
+        self._detail = QLabel("Polars DataFrame is being prepared, please wait.")
         self._detail.setStyleSheet(
             "font-size: 10pt; color: #a39580; background: transparent;"
         )
@@ -314,14 +315,14 @@ class _EmptyWidget(QWidget):
         super().__init__(parent)
         layout = QVBoxLayout(self)
         layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._label = QLabel("📂 Henüz veri yüklenmedi")
+        self._label = QLabel("No data loaded yet")
         self._label.setStyleSheet(
             "font-size: 14pt; font-weight: 600; color: #8b7355; background: transparent;"
         )
         self._label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(self._label)
 
-        self._detail = QLabel("File widget'tan bir dosya seçerek başlayabilirsiniz.")
+        self._detail = QLabel("You can start by selecting a file from the File widget.")
         self._detail.setStyleSheet(
             "font-size: 10pt; color: #a39580; background: transparent;"
         )
@@ -700,14 +701,23 @@ class DataTableScreen(QWidget, WorkflowNodeScreenSupport):
                 for row in selected_rows
                 if target_position < len(row) and str(row[target_position]).strip()
             }
-            selected_target = f"{selected_target} ({len(selected_target_values)} values)"
+            selected_target = i18n.tf("{target_label} ({count} values)", target_label=selected_target, count=len(selected_target_values))
 
         dataset_name = _describe_dataset(self._dataset_handle)
         selected_summary = "\n".join(
             [
-                f"Selected Data: {dataset_name}: {len(selected_row_indexes)} instances, {len(selected_column_indexes)} variables",
-                f"Features: {len(selected_numeric_features)} numeric ({'no missing values' if selected_missing == 0 else 'contains missing values'})",
-                f"Target: {selected_target}",
+                i18n.tf(
+                    "Selected Data: {dataset_name}: {row_count} instances, {column_count} variables",
+                    dataset_name=dataset_name,
+                    row_count=len(selected_row_indexes),
+                    column_count=len(selected_column_indexes),
+                ),
+                i18n.tf(
+                    "Features: {count} numeric ({missing_summary})",
+                    count=len(selected_numeric_features),
+                    missing_summary=i18n.t("no missing values") if selected_missing == 0 else i18n.t("contains missing values"),
+                ),
+                i18n.tf("Target: {target_label}", target_label=selected_target),
             ]
         )
         return {
@@ -734,10 +744,22 @@ class DataTableScreen(QWidget, WorkflowNodeScreenSupport):
         self._info_label.setText(
             "\n".join(
                 [
-                    f"{self._total_rows} instances ({'no missing data' if self._missing_count == 0 else f'{self._missing_count} missing values'})",
-                    f"{len(numeric_features)} numeric features",
-                    f"Target with {len(target_values)} values" if self._target_column_index is not None else "No target variable inferred",
-                    "No meta attributes.",
+                    i18n.tf(
+                        "{count} instances ({missing_summary})",
+                        count=self._total_rows,
+                        missing_summary=(
+                            i18n.t("no missing data")
+                            if self._missing_count == 0
+                            else i18n.tf("{count} missing values", count=self._missing_count)
+                        ),
+                    ),
+                    i18n.tf("{count} numeric features", count=len(numeric_features)),
+                    (
+                        i18n.tf("Target with {count} values", count=len(target_values))
+                        if self._target_column_index is not None
+                        else i18n.t("No target variable inferred")
+                    ),
+                    i18n.t("No meta attributes."),
                 ]
             )
         )
@@ -747,10 +769,19 @@ class DataTableScreen(QWidget, WorkflowNodeScreenSupport):
         self._summary_label.setText(
             "\n".join(
                 [
-                    f"Data: {dataset_name}: {self._total_rows} instances, {len(self._headers)} variables",
-                    f"Features: {len(numeric_features)} numeric ({'no missing values' if self._missing_count == 0 else 'contains missing values'})",
-                    f"Target: {target_label}",
-                    "Showing all rows in the table",
+                    i18n.tf(
+                        "Data: {dataset_name}: {row_count} instances, {column_count} variables",
+                        dataset_name=dataset_name,
+                        row_count=self._total_rows,
+                        column_count=len(self._headers),
+                    ),
+                    i18n.tf(
+                        "Features: {count} numeric ({missing_summary})",
+                        count=len(numeric_features),
+                        missing_summary=i18n.t("no missing values") if self._missing_count == 0 else i18n.t("contains missing values"),
+                    ),
+                    i18n.tf("Target: {target_label}", target_label=target_label),
+                    i18n.t("Showing all rows in the table"),
                 ]
             )
         )
@@ -806,7 +837,13 @@ class DataTableScreen(QWidget, WorkflowNodeScreenSupport):
         if selected_rows == 0:
             self._selected_summary_label.setText("Data Subset: -")
         else:
-            self._selected_summary_label.setText(f"Selected Data: {selected_rows} instances, {len(selected_column_indexes)} variables")
+            self._selected_summary_label.setText(
+                i18n.tf(
+                    "Selected Data: {row_count} instances, {column_count} variables",
+                    row_count=selected_rows,
+                    column_count=len(selected_column_indexes),
+                )
+            )
 
     def _set_empty_state(self) -> None:
         self._headers = []
@@ -816,9 +853,9 @@ class DataTableScreen(QWidget, WorkflowNodeScreenSupport):
         self._target_column_index = None
         self._total_rows = 0
         self._missing_count = 0
-        self._summary_label.setText("Data: none")
-        self._selected_summary_label.setText("Data Subset: -")
-        self._info_label.setText("No dataset loaded.")
+        self._summary_label.setText(i18n.t("Data: none"))
+        self._selected_summary_label.setText(i18n.t("Data Subset: -"))
+        self._info_label.setText(i18n.t("No dataset loaded."))
         self._model.clear()
         self._restore_order_button.setEnabled(False)
         self._stack.setCurrentIndex(0)
@@ -826,6 +863,14 @@ class DataTableScreen(QWidget, WorkflowNodeScreenSupport):
     def _handle_selection_changed(self, *_args) -> None:
         self._update_selection_summary()
         self._notify_output_changed()
+
+    def refresh_translations(self) -> None:
+        if self._dataset_handle is None:
+            self._set_empty_state()
+            return
+        self._refresh_headers()
+        self._refresh_info()
+        self._update_selection_summary()
 
     def _apply_selection_restore(self, row_indexes: list[int], column_indexes: list[int]) -> None:
         selection_model = self._table.selectionModel()

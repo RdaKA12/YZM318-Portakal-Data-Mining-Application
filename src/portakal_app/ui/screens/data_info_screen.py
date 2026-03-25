@@ -24,6 +24,7 @@ from portakal_app.data.services.file_import_service import FileImportService
 from portakal_app.data.services.llm_analyzer import LLMAnalyzer
 from portakal_app.data.services.llm_context_builder import LLMContextBuilder
 from portakal_app.models import DataInfoViewModel, LLMSessionConfig, MetricCardData
+from portakal_app.ui import i18n
 from portakal_app.ui.screens.node_screen import WorkflowNodeScreenSupport
 
 
@@ -192,14 +193,14 @@ class DataInfoScreen(QWidget, WorkflowNodeScreenSupport):
         self._summary = None
 
         if resolved_dataset is None:
-            self._dataset_label.setText("Dataset: none")
+            self._dataset_label.setText(i18n.t("Dataset: none"))
             self._render_view_model(
                 DataInfoViewModel(
                     summary_cards=[],
                     column_profiles=[],
                     risks=[],
                     suggestions=[],
-                    llm_status="No dataset loaded",
+                    llm_status=i18n.t("No dataset loaded"),
                     llm_error="",
                     is_analyzing=False,
                 )
@@ -207,7 +208,7 @@ class DataInfoScreen(QWidget, WorkflowNodeScreenSupport):
             self._update_analyze_button_state()
             return
 
-        self._dataset_label.setText(f"Dataset: {resolved_dataset.source.path.name}")
+        self._dataset_label.setText(i18n.tf("Dataset: {name}", name=resolved_dataset.source.path.name))
         self._summary = self._data_info_service.summarize(resolved_dataset)
         self._render_view_model(self._data_info_service.build_from_summary(self._summary))
         self._update_analyze_button_state()
@@ -243,7 +244,7 @@ class DataInfoScreen(QWidget, WorkflowNodeScreenSupport):
             view_model.suggestions,
             empty_text="No AI suggestions yet.",
         )
-        self._analyze_button.setText("Analyzing..." if view_model.is_analyzing else "Analyze")
+        self._analyze_button.setText(i18n.t("Analyzing...") if view_model.is_analyzing else i18n.t("Analyze"))
         self._update_analyze_button_state()
 
     def _render_summary_cards(self, cards: list[MetricCardData]) -> None:
@@ -254,7 +255,9 @@ class DataInfoScreen(QWidget, WorkflowNodeScreenSupport):
                 widget.deleteLater()
 
         if not cards:
-            placeholder = self._build_card(MetricCardData("Summary", "No dataset", "Load data to inspect it"))
+            placeholder = self._build_card(
+                MetricCardData(i18n.t("Summary"), i18n.t("No dataset"), i18n.t("Load data to inspect it"))
+            )
             self._summary_cards_layout.addWidget(placeholder, 0, 0)
             return
 
@@ -316,7 +319,7 @@ class DataInfoScreen(QWidget, WorkflowNodeScreenSupport):
     ) -> None:
         widget.clear()
         if not items:
-            widget.addItem(QListWidgetItem(empty_text))
+            widget.addItem(QListWidgetItem(i18n.t(empty_text)))
             return
         for item in items:
             text = f"[{item.severity.upper()}] {item.title}\n{item.body}"
@@ -324,7 +327,7 @@ class DataInfoScreen(QWidget, WorkflowNodeScreenSupport):
 
     def _start_analysis(self) -> None:
         if self._dataset_handle is None or self._summary is None:
-            self._render_view_model(replace(self._view_model, llm_error="Load a dataset before running AI analysis."))
+            self._render_view_model(replace(self._view_model, llm_error=i18n.t("Load a dataset before running AI analysis.")))
             return
         if self._analysis_thread is not None:
             return
@@ -336,7 +339,7 @@ class DataInfoScreen(QWidget, WorkflowNodeScreenSupport):
                 self._view_model,
                 risks=[],
                 suggestions=[],
-                llm_status="AI analysis in progress...",
+                llm_status=i18n.t("AI analysis in progress..."),
                 llm_error="",
                 is_analyzing=True,
             )
@@ -369,13 +372,17 @@ class DataInfoScreen(QWidget, WorkflowNodeScreenSupport):
         actions = [
             item for item in parsed_suggestions if isinstance(item, AnalysisSuggestion) and item.kind == "suggestion"
         ]
-        model_text = self._llm_session_config.model.strip() or "model not set"
+        model_text = self._llm_session_config.model.strip() or i18n.t("not set")
         self._render_view_model(
             replace(
                 self._view_model,
                 risks=risks,
                 suggestions=actions,
-                llm_status=f"Analyzed with {self._llm_session_config.provider} ({model_text})",
+                llm_status=i18n.tf(
+                    "Analyzed with {provider} ({model})",
+                    provider=self._llm_session_config.provider,
+                    model=model_text,
+                ),
                 llm_error="",
                 is_analyzing=False,
             )
@@ -389,8 +396,8 @@ class DataInfoScreen(QWidget, WorkflowNodeScreenSupport):
                 self._view_model,
                 risks=[],
                 suggestions=[],
-                llm_status="AI analysis failed",
-                llm_error=error_message or "AI analysis failed.",
+                llm_status=i18n.t("AI analysis failed"),
+                llm_error=error_message or i18n.t("AI analysis failed."),
                 is_analyzing=False,
             )
         )
@@ -402,8 +409,8 @@ class DataInfoScreen(QWidget, WorkflowNodeScreenSupport):
 
     def _refresh_provider_label(self) -> None:
         provider = self._llm_session_config.provider
-        model = self._llm_session_config.model.strip() or self._llm_session_config.model_placeholder() or "not set"
-        self._provider_label.setText(f"Provider: {provider} | Model: {model}")
+        model = self._llm_session_config.model.strip() or self._llm_session_config.model_placeholder() or i18n.t("not set")
+        self._provider_label.setText(i18n.tf("Provider: {provider} | Model: {model}", provider=provider, model=model))
 
     def _update_analyze_button_state(self) -> None:
         self._analyze_button.setEnabled(self._dataset_handle is not None and self._analysis_thread is None)
@@ -419,5 +426,13 @@ class DataInfoScreen(QWidget, WorkflowNodeScreenSupport):
 
     def footer_status_text(self) -> str:
         if self._dataset_handle is None:
-            return "Info"
+            return i18n.t("Info")
         return str(self._dataset_handle.column_count)
+
+    def refresh_translations(self) -> None:
+        if self._dataset_handle is None:
+            self._dataset_label.setText(i18n.t("Dataset: none"))
+        else:
+            self._dataset_label.setText(i18n.tf("Dataset: {name}", name=self._dataset_handle.source.path.name))
+        self._refresh_provider_label()
+        self._render_view_model(self._view_model)

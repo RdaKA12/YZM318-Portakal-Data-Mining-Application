@@ -8,16 +8,14 @@ from PySide6.QtWidgets import QFrame, QGridLayout, QLabel, QLineEdit, QPushButto
 
 from portakal_app.models import WidgetDefinition
 from portakal_app.ui.icons import get_widget_icon
+from portakal_app.ui import i18n
 
 
 class WidgetCatalogButton(QPushButton):
     activateRequested = Signal(str)
 
     def __init__(self, widget_definition: WidgetDefinition, parent: QWidget | None = None) -> None:
-        label = widget_definition.label
-        if not widget_definition.enabled:
-            label = f"{label}\nComing soon"
-        super().__init__(label, parent)
+        super().__init__(parent)
         self._widget_definition = widget_definition
         self._drag_start_position = QPoint()
         self._drag_in_progress = False
@@ -32,12 +30,19 @@ class WidgetCatalogButton(QPushButton):
         self.setMaximumHeight(76)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setToolTip(widget_definition.description)
         icon = get_widget_icon(widget_definition.icon_name)
         if icon is not None:
             self.setIcon(icon)
             self.setIconSize(QSize(24, 24))
         self.setStyleSheet("text-align: left; padding-top: 8px;")
+        self.refresh_translations()
+
+    def refresh_translations(self) -> None:
+        label = self._widget_definition.label
+        if not self._widget_definition.enabled:
+            label = f"{label}\n{i18n.t('Coming soon')}"
+        self.setText(label)
+        self.setToolTip(self._widget_definition.description)
 
     def mousePressEvent(self, event) -> None:
         if event.button() == Qt.MouseButton.LeftButton:
@@ -96,13 +101,13 @@ class WidgetCatalogPanel(QFrame):
         outer_layout.setContentsMargins(14, 14, 14, 14)
         outer_layout.setSpacing(12)
 
-        self._title = QLabel("Data")
+        self._title = QLabel(i18n.t("Data"))
         self._title.setProperty("sectionTitle", True)
         outer_layout.addWidget(self._title)
 
         self._search = QLineEdit()
         self._search.setObjectName("catalogSearch")
-        self._search.setPlaceholderText("Filter widgets...")
+        self._search.setPlaceholderText(i18n.t("Filter widgets..."))
         self._search.textChanged.connect(self._render_grid)
         outer_layout.addWidget(self._search)
 
@@ -117,6 +122,12 @@ class WidgetCatalogPanel(QFrame):
         self._title.setText(category_label)
         self._widget_definitions = list(widgets)
         self._search.clear()
+        self._render_grid()
+
+    def refresh_translations(self, category_label: str | None = None) -> None:
+        if category_label is not None:
+            self._title.setText(category_label)
+        self._search.setPlaceholderText(i18n.t("Filter widgets..."))
         self._render_grid()
 
     def current_widget_ids(self) -> list[str]:

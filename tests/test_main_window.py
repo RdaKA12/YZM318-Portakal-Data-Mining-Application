@@ -17,6 +17,7 @@ from PySide6.QtWidgets import QApplication, QComboBox, QDialog, QMenu, QMessageB
 from portakal_app.app import create_application
 from portakal_app.data.models import AnalysisSuggestion
 from portakal_app.models import LLMSessionConfig
+from portakal_app.ui import i18n
 from portakal_app.ui.main_window import LLMSettingsDialog, MainWindow, WorkflowInfoDialog
 from portakal_app.ui.screens.column_statistics_screen import ColumnStatisticsScreen
 from portakal_app.ui.screens.csv_import_screen import CSVImportScreen
@@ -24,6 +25,7 @@ from portakal_app.ui.screens.data_info_screen import DataInfoScreen
 from portakal_app.ui.screens.data_table_screen import DataTableScreen
 from portakal_app.ui.screens.edit_domain_screen import EditDomainScreen
 from portakal_app.ui.screens.file_screen import FileScreen
+from portakal_app.ui.screens.paint_data_screen import PaintDataScreen
 from portakal_app.ui.screens.rank_screen import RankScreen
 from portakal_app.ui.screens.save_data_screen import SaveDataScreen
 from portakal_app.ui.shell.widget_catalog import WidgetCatalogButton, WidgetCatalogPanel
@@ -351,6 +353,9 @@ def test_file_screen_exposes_orange_like_sections(app):
     assert screen._browse_button.objectName() == "fileSourceActionButton"
     assert screen._reload_button.objectName() == "fileSourceActionButton"
     assert screen._url_combo.isEnabled()
+    assert screen._columns_table.rowCount() == 0
+    assert screen._columns_table.isEnabled() is False
+    assert screen._apply_button.isEnabled() is False
 
 
 def test_file_screen_switches_to_url_mode_on_url_focus(app):
@@ -359,6 +364,94 @@ def test_file_screen_switches_to_url_mode_on_url_focus(app):
     focus_event = QFocusEvent(QEvent.Type.FocusIn)
     QApplication.sendEvent(screen._url_combo.lineEdit(), focus_event)
     assert screen._url_radio.isChecked()
+
+
+def test_file_screen_shows_kaggle_credentials_only_in_url_mode(app):
+    screen = FileScreen()
+
+    assert screen._kaggle_username_input.isHidden() is True
+    assert screen._kaggle_key_input.isHidden() is True
+
+    screen._url_radio.setChecked(True)
+
+    assert screen._kaggle_username_input.isHidden() is False
+    assert screen._kaggle_key_input.isHidden() is False
+
+
+def test_file_screen_passes_manual_kaggle_credentials_to_service(app, monkeypatch):
+    screen = FileScreen()
+    captured = {}
+
+    def fake_load_from_url(url, *, kaggle_username=None, kaggle_key=None):
+        captured["url"] = url
+        captured["kaggle_username"] = kaggle_username
+        captured["kaggle_key"] = kaggle_key
+        raise RuntimeError("stop after capture")
+
+    monkeypatch.setattr(screen._import_service, "load_from_url", fake_load_from_url)
+
+    screen._url_radio.setChecked(True)
+    screen._kaggle_username_input.setText("manual-user")
+    screen._kaggle_key_input.setText("manual-key")
+    screen.set_remote_url("https://www.kaggle.com/datasets/owner/demo-dataset")
+
+    assert captured["url"].startswith("https://www.kaggle.com/datasets/")
+    assert captured["kaggle_username"] == "manual-user"
+    assert captured["kaggle_key"] == "manual-key"
+
+
+def test_file_screen_shows_actionable_message_for_kaggle_code_urls(app):
+    previous_language = i18n.current_language()
+    try:
+        i18n.set_language("tr")
+        screen = FileScreen()
+        screen._url_radio.setChecked(True)
+        screen.set_remote_url("https://www.kaggle.com/code/mragpavank/breast-cancer-wisconsin")
+
+        assert screen._dataset_title.text() == "URL yüklenirken hata oluştu"
+        assert "Kaggle notebook/code bağlantıları desteklenmiyor." in screen._dataset_description.text()
+        assert "datasets/<owner>/<dataset-name>" in screen._dataset_description.text()
+        assert screen._columns_table.rowCount() == 0
+    finally:
+        i18n.set_language(previous_language)
+
+
+def test_file_screen_turkish_dynamic_info_and_apply_feedback(app):
+    previous_language = i18n.current_language()
+    try:
+        i18n.set_language("tr")
+        screen = FileScreen()
+        i18n.apply_to_widget(screen)
+
+        assert screen._dataset_title.text() == "Veri seti seçilmedi"
+        assert "Meta verileri incelemek" in screen._dataset_description.text()
+        assert screen._url_combo.lineEdit().placeholderText() == "Uzak veri seti URL'sini yapıştırın..."
+        assert screen._file_type_combo.itemText(0) == "Türü dosya uzantısından belirle"
+        assert screen._columns_table.rowCount() == 0
+        assert screen._apply_button.isEnabled() is False
+
+        screen._handle_apply_clicked()
+        assert "Uygulamadan önce dosya yolu veya URL seçin." in screen._dataset_description.text()
+    finally:
+        i18n.set_language(previous_language)
+
+
+def test_file_screen_shows_apply_error_instead_of_silent_fallback(app, tmp_path):
+    screen = FileScreen()
+    csv_path = tmp_path / "duplicate-target.csv"
+    csv_path.write_text("id,diagnosis,\n1,M,\n2,B,\n", encoding="utf-8")
+    screen.set_selected_file(str(csv_path))
+
+    for row in range(screen._columns_table.rowCount()):
+        name_item = screen._columns_table.item(row, 0)
+        if name_item is not None and name_item.text() == "id":
+            screen._columns_table.cellWidget(row, 2).setCurrentText("target")
+            break
+
+    screen._handle_apply_clicked()
+
+    assert screen._dataset_title.text() == "Apply failed"
+    assert "Exactly one target column is allowed." in screen._dataset_description.text()
 
 
 def test_save_data_screen_exposes_orange_like_actions(app, tmp_path):
@@ -663,6 +756,73 @@ def test_edit_domain_apply_updates_global_preview_snapshot(app, tmp_path):
     assert preview["headers"] == ["value", "label"]
 
 
+def test_file_apply_propagates_column_renames_to_paint_data(app, tmp_path):
+    window = MainWindow()
+    source = window._workspace.canvas.add_workflow_node("file")
+    target = window._workspace.canvas.add_workflow_node("paint-data")
+    assert window._workspace.canvas.workflow_scene.create_connection(source.node_id, target.node_id)
+
+    csv_path = tmp_path / "file-paint.csv"
+    csv_path.write_text("x,y,label\n1,2,A\n3,4,B\n", encoding="utf-8")
+    window._handle_file_selected(str(csv_path))
+
+    file_screen = window._workspace.screen_for_node(source.node_id)
+    paint_screen = window._workspace.screen_for_node(target.node_id)
+    assert isinstance(file_screen, FileScreen)
+    assert isinstance(paint_screen, PaintDataScreen)
+
+    file_screen._columns_table.item(0, 0).setText("feature_x")
+    file_screen._columns_table.item(1, 0).setText("feature_y")
+    file_screen._apply_button.click()
+    assert file_screen.current_output_dataset() is not None
+    assert file_screen.current_output_dataset().dataframe.columns[:2] == ["feature_x", "feature_y"]
+    window._recompute_node_runtime()
+
+    snapshot = paint_screen._current_snapshot()
+    assert snapshot.x_name == "feature_x"
+    assert snapshot.y_name == "feature_y"
+    assert paint_screen._canvas._x_axis_label == "feature_x"
+    assert paint_screen._canvas._y_axis_label == "feature_y"
+
+
+def test_file_apply_role_changes_update_paint_data_snapshot_and_labels(app, tmp_path):
+    window = MainWindow()
+    source = window._workspace.canvas.add_workflow_node("file")
+    target = window._workspace.canvas.add_workflow_node("paint-data")
+    assert window._workspace.canvas.workflow_scene.create_connection(source.node_id, target.node_id)
+
+    csv_path = tmp_path / "breast-cancer-like.csv"
+    csv_path.write_text(
+        "id,diagnosis,radius_mean,texture_mean,perimeter_mean,\n"
+        "1,M,17.99,10.38,122.8,\n"
+        "2,B,20.57,17.77,132.9,\n",
+        encoding="utf-8",
+    )
+    window._handle_file_selected(str(csv_path))
+
+    file_screen = window._workspace.screen_for_node(source.node_id)
+    paint_screen = window._workspace.screen_for_node(target.node_id)
+    assert isinstance(file_screen, FileScreen)
+    assert isinstance(paint_screen, PaintDataScreen)
+
+    role_by_name = {}
+    for row in range(file_screen._columns_table.rowCount()):
+        name_item = file_screen._columns_table.item(row, 0)
+        role_widget = file_screen._columns_table.cellWidget(row, 2)
+        if name_item is not None and isinstance(role_widget, QComboBox):
+            role_by_name[name_item.text()] = role_widget
+
+    role_by_name["id"].setCurrentText("skip")
+    role_by_name["diagnosis"].setCurrentText("target")
+    role_by_name["texture_mean"].setCurrentText("skip")
+    role_by_name["perimeter_mean"].setCurrentText("feature")
+    file_screen._handle_apply_clicked()
+
+    snapshot = paint_screen._current_snapshot()
+    assert snapshot.x_name == "radius_mean"
+    assert snapshot.y_name == "perimeter_mean"
+    assert snapshot.labels == ("M", "B")
+
 def test_data_table_selection_drives_downstream_save_data_input(app, tmp_path):
     window = MainWindow()
     source = window._workspace.canvas.add_workflow_node("file")
@@ -966,12 +1126,72 @@ def test_llm_settings_dialog_updates_provider_fields(app, monkeypatch):
 
     assert "Environment key detected" in dialog.env_status_label.text()
     assert dialog.base_url_input.text() == "https://api.openai.com/v1"
-
     dialog.provider_combo.setCurrentText("Ollama")
 
     assert dialog.api_key_input.isEnabled() is False
     assert dialog.base_url_input.text() == "http://localhost:11434"
     assert "does not require an API key" in dialog.env_status_label.text()
+
+
+def test_language_switch_updates_open_widget_texts_immediately(app, monkeypatch):
+    previous_language = i18n.current_language()
+    window = MainWindow()
+    file_node = window._workspace.canvas.add_workflow_node("file")
+    window._show_widget(file_node.node_id)
+    file_screen = window._workspace.current_widget()
+    assert isinstance(file_screen, FileScreen)
+
+    monkeypatch.setattr(QMessageBox, "information", lambda *args, **kwargs: 0)
+
+    try:
+        i18n.set_language("en")
+        i18n.set_language("tr")
+        assert window.menuBar().actions()[0].text() == "Dosya"
+        assert window._menus["options"].actions()[0].text() == "Dil"
+        assert file_screen._file_radio.text() == "Dosya:"
+        assert file_screen._reload_button.text() == "Yeniden Yükle"
+        i18n.set_language("en")
+        assert window.menuBar().actions()[0].text() == "File"
+        assert file_screen._file_radio.text() == "File:"
+    finally:
+        i18n.set_language(previous_language)
+
+
+def test_language_switch_updates_shell_catalog_and_node_labels(app):
+    previous_language = i18n.current_language()
+    window = MainWindow()
+    record = window._workspace.canvas.add_workflow_node("column-statistics")
+    scene = window._workspace.canvas.workflow_scene
+    node = scene._nodes[record.node_id]
+
+    try:
+        i18n.set_language("en")
+        i18n.set_language("tr")
+
+        assert window._workspace._title_label.text() == "İş Akışı"
+        assert window._workspace._subtitle_label.text().startswith("Bileşenleri katalogdan tuvale sürükleyin.")
+        assert [window._sidebar._list.item(index).text() for index in range(window._sidebar._list.count())] == [
+            "Veri",
+            "Dönüştür",
+            "Görselleştir",
+            "Model",
+            "Değerlendir",
+            "Gözetimsiz",
+        ]
+        assert node.display_label == "Sütun İstatistikleri"
+
+        window._on_category_selected("transform")
+        button_texts = [button.text() for button in window._catalog.findChildren(WidgetCatalogButton)]
+        assert window._catalog._title.text() == "Dönüştür"
+        assert any(text.startswith("Sütun Seç") for text in button_texts)
+        assert any(text.startswith("Normalleştir") for text in button_texts)
+
+        i18n.set_language("en")
+        assert window._workspace._title_label.text() == "Workflow"
+        assert window._sidebar._list.item(1).text() == "Transform"
+        assert node.display_label == "Column Statistics"
+    finally:
+        i18n.set_language(previous_language)
 
 
 def test_settings_dialog_updates_global_llm_config_without_serializing_it(app, monkeypatch):

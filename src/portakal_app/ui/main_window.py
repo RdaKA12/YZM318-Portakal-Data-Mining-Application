@@ -296,13 +296,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self._apply_initial_geometry()
 
-        self._categories = build_categories()
-        self._widgets = build_widgets()
-        self._widgets_by_category = defaultdict(list)
-        self._widget_index: dict[str, WidgetDefinition] = {}
-        for widget in self._widgets:
-            self._widgets_by_category[widget.category_id].append(widget)
-            self._widget_index[widget.id] = widget
+        self._rebuild_catalog_definitions()
 
         self._state_store = AppStateStore(AppState())
         self._status_bar = StatusBarController()
@@ -468,16 +462,42 @@ class MainWindow(QMainWindow):
         self._menus["options"] = menu
         lang_menu = menu.addMenu("Language / Dil")
         lang_menu.addAction(self._create_action("lang_en", "English", lambda: i18n.set_language("en")))
-        lang_menu.addAction(self._create_action("lang_tr", "Türkçe", lambda: i18n.set_language("tr")))
+        lang_menu.addAction(self._create_action("lang_tr", "Turkish", lambda: i18n.set_language("tr")))
         i18n.on_language_changed(self._handle_language_changed)
         menu.addSeparator()
         menu.addAction(self._create_action("options_settings", "Settings", self._show_settings_dialog))
         menu.addAction(self._create_action("options_reset_widgets", "Reset Widget Settings...", self._reset_widget_settings))
         menu.addAction(self._create_action("options_addons", "Add-ons...", self._show_addons_dialog))
 
+    def _rebuild_catalog_definitions(self) -> None:
+        self._categories = build_categories()
+        self._widgets = build_widgets()
+        self._widgets_by_category = defaultdict(list)
+        self._widget_index = {}
+        for widget in self._widgets:
+            self._widgets_by_category[widget.category_id].append(widget)
+            self._widget_index[widget.id] = widget
+
     def _handle_language_changed(self, lang: str) -> None:
-        msg = "Dil değiştirildi. Yeni pencerelerde ve yapay zeka yanıtlarında etki gösterecektir. Tam çeviri için uygulamayı yeniden başlatmanız gerekebilir." if lang == "tr" else "Language changed. It will take effect on new windows and AI responses. Restart the app for full translation."
-        QMessageBox.information(self, "Language / Dil", msg)
+        self._rebuild_catalog_definitions()
+        self._sidebar.set_categories(self._categories)
+        self._sidebar.refresh_translations()
+        self._sidebar.setFixedWidth(self._sidebar.recommended_width())
+        self._workspace.update_widget_index(self._widget_index)
+        current_category_id = self.state.selected_category
+        self._sidebar.set_current_category(current_category_id)
+        self._on_category_selected(current_category_id)
+        self._catalog.refresh_translations(self._catalog._title.text())
+        i18n.apply_to_widget(self)
+        for screen in self._workspace.all_screens():
+            i18n.apply_to_widget(screen)
+            refresh_translations = getattr(screen, "refresh_translations", None)
+            if callable(refresh_translations):
+                refresh_translations()
+        self._workspace.refresh_translations()
+        self._workspace.refresh_dialog_footers()
+        _ = lang
+        self._state_store.update(status_message=i18n.t("Language changed. Open widgets were updated immediately."))
 
     def _build_help_menu(self, menu: QMenu) -> None:
         self._menus["help"] = menu
@@ -570,6 +590,7 @@ class MainWindow(QMainWindow):
         input_handler = getattr(screen, "set_input_payload", None)
         if callable(input_handler):
             input_handler(None)
+        i18n.apply_to_widget(screen)
         return screen
 
     def _sync_node_runtimes(self) -> None:
@@ -800,8 +821,14 @@ class MainWindow(QMainWindow):
                 input_handler = getattr(runtime.screen, "set_input_payload", None)
                 if callable(input_handler) and definition.input_ports:
                     primary_port_id = definition.input_ports[0].id
-                    if previous_inputs.get(primary_port_id) != resolved_inputs.get(primary_port_id):
-                        input_handler(resolved_inputs.get(primary_port_id))
+                    previous_payload = previous_inputs.get(primary_port_id)
+                    next_payload = resolved_inputs.get(primary_port_id)
+                    previous_dataset = previous_payload.dataset if isinstance(previous_payload, WorkflowPayload) else None
+                    next_dataset = next_payload.dataset if isinstance(next_payload, WorkflowPayload) else None
+                    payload_changed = previous_payload != next_payload
+                    dataset_instance_changed = previous_dataset is not next_dataset
+                    if payload_changed or dataset_instance_changed:
+                        input_handler(next_payload)
 
                 output_dataset = None
                 output_provider = getattr(runtime.screen, "current_output_dataset", None)

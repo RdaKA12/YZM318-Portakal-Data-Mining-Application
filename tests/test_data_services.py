@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import httpx
+import subprocess
+import sys
 from pathlib import Path
 
 import polars as pl
@@ -27,6 +29,7 @@ from portakal_app.data.services.paint_data_service import PaintDataService
 from portakal_app.data.services.profiling_service import ProfilingService
 from portakal_app.data.services.save_data_service import SaveDataService
 from portakal_app.models import LLMSessionConfig
+from portakal_app.ui import i18n
 
 
 @pytest.fixture()
@@ -157,6 +160,82 @@ def test_file_import_service_skip_rows_applies_before_header(tmp_path):
     assert dataset.row_count == 2
 
 
+def test_file_import_service_load_from_url_falls_back_to_venv_kaggle_cli(monkeypatch, tmp_path):
+    service = FileImportService()
+    commands: list[list[str]] = []
+    expected_cli = str(Path(sys.executable).with_name("kaggle.exe"))
+    monkeypatch.setattr("portakal_app.data.services.file_import_service.which", lambda _name: None)
+
+    def fake_run(command, *, capture_output, text, check, env=None):
+        commands.append(command)
+        target_index = command.index("-p") + 1
+        output_dir = Path(command[target_index])
+        output_dir.mkdir(parents=True, exist_ok=True)
+        (output_dir / "sample.csv").write_text("a,b\n1,2\n", encoding="utf-8")
+        return object()
+
+    monkeypatch.setattr("portakal_app.data.services.file_import_service.subprocess.run", fake_run)
+
+    dataset = service.load_from_url("https://www.kaggle.com/datasets/owner/demo-dataset")
+
+    assert dataset.row_count == 1
+    assert dataset.dataframe.columns == ["a", "b"]
+    assert commands[0][0] == expected_cli
+
+
+def test_file_import_service_load_from_url_surfaces_kaggle_stderr(monkeypatch):
+    service = FileImportService()
+
+    def failing_run(command, *, capture_output, text, check, env=None):
+        raise subprocess.CalledProcessError(1, command, output="", stderr="Unauthorized")
+
+    monkeypatch.setattr("portakal_app.data.services.file_import_service.subprocess.run", failing_run)
+
+    with pytest.raises(DatasetLoadError, match="Unauthorized"):
+        service.load_from_url("https://www.kaggle.com/datasets/owner/demo-dataset")
+
+
+def test_file_import_service_load_from_url_accepts_manual_credentials(monkeypatch):
+    service = FileImportService()
+    captured_env = {}
+
+    def fake_run(command, *, capture_output, text, check, env=None):
+        captured_env.update(env or {})
+        output_dir = Path(command[command.index("-p") + 1])
+        output_dir.mkdir(parents=True, exist_ok=True)
+        (output_dir / "sample.csv").write_text("a,b\n1,2\n", encoding="utf-8")
+        return object()
+
+    monkeypatch.setattr("portakal_app.data.services.file_import_service.subprocess.run", fake_run)
+
+    service.load_from_url(
+        "https://www.kaggle.com/datasets/owner/demo-dataset",
+        kaggle_username="manual-user",
+        kaggle_key="manual-key",
+    )
+
+    assert captured_env["KAGGLE_USERNAME"] == "manual-user"
+    assert captured_env["KAGGLE_KEY"] == "manual-key"
+
+
+def test_file_import_service_load_from_url_rejects_partial_manual_credentials():
+    service = FileImportService()
+
+    with pytest.raises(DatasetLoadError, match="Enter both Kaggle username and API key"):
+        service.load_from_url(
+            "https://www.kaggle.com/datasets/owner/demo-dataset",
+            kaggle_username="only-user",
+            kaggle_key="",
+        )
+
+
+def test_file_import_service_load_from_url_rejects_kaggle_code_urls():
+    service = FileImportService()
+
+    with pytest.raises(DatasetLoadError, match="notebook/code URLs are not supported"):
+        service.load_from_url("https://www.kaggle.com/code/mragpavank/breast-cancer-wisconsin")
+
+
 def test_save_data_service_exports_csv_xlsx_and_parquet_round_trip(tmp_path, sample_dataframe):
     import_service = FileImportService()
     save_service = SaveDataService()
@@ -248,6 +327,35 @@ def test_domain_transform_service_rejects_lossy_conversion(tmp_path):
             dataset,
             DomainEditRequest(columns=(DomainColumnEdit("city", "city", "numeric", "feature"),)),
         )
+
+
+def test_build_data_domain_does_not_infer_blank_named_column_as_target(tmp_path):
+    source_path = tmp_path / "trailing-empty.csv"
+    source_path.write_text("id,diagnosis,\n1,M,\n2,B,\n", encoding="utf-8")
+
+    dataset = FileImportService().load(str(source_path))
+
+    targets = [column.name for column in dataset.domain.columns if column.role == "target"]
+    assert targets == ["diagnosis"]
+
+
+def test_paint_data_service_prefers_non_identifier_numeric_columns_for_default_axes(tmp_path):
+    source_path = tmp_path / "paint-default-axes.csv"
+    pl.DataFrame(
+        {
+            "id": [101, 102, 103],
+            "radius_mean": [10.0, 20.0, 30.0],
+            "texture_mean": [1.0, 2.0, 3.0],
+            "diagnosis": ["M", "B", "M"],
+        }
+    ).write_csv(source_path)
+    dataset = FileImportService().load(str(source_path))
+
+    snapshot = PaintDataService().build_snapshot(dataset)
+
+    assert snapshot.x_source_name == "radius_mean"
+    assert snapshot.y_source_name == "texture_mean"
+    assert snapshot.label_source_name == "diagnosis"
 
 
 def test_column_statistics_service_reports_numeric_outliers(tmp_path):
@@ -510,3 +618,26 @@ def test_llm_analyzer_surfaces_http_and_parse_errors(monkeypatch):
             context="Dataset summary",
             config=LLMSessionConfig(provider="OpenAI", model="gpt-test", base_url="https://api.openai.com/v1", api_key="sk"),
         )
+
+
+def test_llm_analyzer_uses_selected_ui_language_in_system_prompt(monkeypatch):
+    captured = {}
+
+    def fake_post(url, *, headers, params=None, json, timeout):
+        captured["system_prompt"] = json["messages"][0]["content"]
+        return _FakeResponse(200, {"choices": [{"message": {"content": '{"risks":[],"suggestions":[]}'}}]})
+
+    monkeypatch.setattr("portakal_app.data.services.llm_analyzer.httpx.post", fake_post)
+
+    previous_language = i18n.current_language()
+    i18n.set_language("tr")
+    try:
+        LLMAnalyzer().analyze(
+            summary=None,  # type: ignore[arg-type]
+            context="Dataset summary",
+            config=LLMSessionConfig(provider="OpenAI", model="gpt-test", base_url="https://api.openai.com/v1", api_key="sk"),
+        )
+    finally:
+        i18n.set_language(previous_language)
+
+    assert "Write all natural language text in Turkish." in captured["system_prompt"]

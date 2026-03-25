@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from portakal_app.models import CategoryDefinition, PortDefinition, WidgetDefinition
+from portakal_app.ui import i18n
 from portakal_app.ui.screens.color_screen import ColorScreen
 from portakal_app.ui.screens.column_statistics_screen import ColumnStatisticsScreen
 from portakal_app.ui.screens.csv_import_screen import CSVImportScreen
@@ -17,7 +18,7 @@ from portakal_app.ui.screens.save_data_screen import SaveDataScreen
 
 def _placeholder_factory(title: str, description: str):
     def factory() -> PlaceholderScreen:
-        return PlaceholderScreen(title=title, message=description)
+        return PlaceholderScreen(title=i18n.t(title), message=i18n.t(description))
 
     return factory
 
@@ -32,25 +33,35 @@ def _outputs(*labels: str) -> tuple[PortDefinition, ...]:
 
 def build_categories() -> list[CategoryDefinition]:
     return [
-        CategoryDefinition(id="data", label="Data"),
-        CategoryDefinition(id="transform", label="Transform"),
-        CategoryDefinition(id="visualize", label="Visualize"),
-        CategoryDefinition(id="model", label="Model"),
-        CategoryDefinition(id="evaluate", label="Evaluate"),
-        CategoryDefinition(id="unsupervised", label="Unsupervised"),
+        CategoryDefinition(id="data", label=i18n.t("Data")),
+        CategoryDefinition(id="transform", label=i18n.t("Transform")),
+        CategoryDefinition(id="visualize", label=i18n.t("Visualize")),
+        CategoryDefinition(id="model", label=i18n.t("Model")),
+        CategoryDefinition(id="evaluate", label=i18n.t("Evaluate")),
+        CategoryDefinition(id="unsupervised", label=i18n.t("Unsupervised")),
     ]
 
 
 def build_widgets() -> list[WidgetDefinition]:
     return [
-        WidgetDefinition("file", "data", "File", True, FileScreen, "Load a file dataset.", "file", (), _outputs("Data")),
+        WidgetDefinition(
+            "file",
+            "data",
+            i18n.t("File"),
+            True,
+            FileScreen,
+            i18n.t("Load a file dataset."),
+            "file",
+            (),
+            _outputs("Data"),
+        ),
         WidgetDefinition(
             "csv-import",
             "data",
-            "CSV File Import",
+            i18n.t("CSV File Import"),
             True,
             CSVImportScreen,
-            "Preset-based import flow.",
+            i18n.t("Preset-based import flow."),
             "csv",
             (),
             _outputs("Data"),
@@ -58,10 +69,10 @@ def build_widgets() -> list[WidgetDefinition]:
         WidgetDefinition(
             "datasets",
             "data",
-            "Datasets",
+            i18n.t("Datasets"),
             True,
             DatasetsScreen,
-            "Explore packaged datasets.",
+            i18n.t("Explore packaged datasets."),
             "dataset",
             (),
             _outputs("Data"),
@@ -69,10 +80,10 @@ def build_widgets() -> list[WidgetDefinition]:
         WidgetDefinition(
             "data-table",
             "data",
-            "Data Table",
+            i18n.t("Data Table"),
             True,
             DataTableScreen,
-            "Inspect loaded rows.",
+            i18n.t("Inspect loaded rows."),
             "table",
             _inputs("Data"),
             _outputs("Data"),
@@ -80,10 +91,10 @@ def build_widgets() -> list[WidgetDefinition]:
         WidgetDefinition(
             "paint-data",
             "data",
-            "Paint Data",
+            i18n.t("Paint Data"),
             True,
             PaintDataScreen,
-            "Edit data manually.",
+            i18n.t("Edit data manually."),
             "paint",
             _inputs("Data"),
             _outputs("Data"),
@@ -91,10 +102,10 @@ def build_widgets() -> list[WidgetDefinition]:
         WidgetDefinition(
             "data-info",
             "data",
-            "Data Info",
+            i18n.t("Data Info"),
             True,
             DataInfoScreen,
-            "Profile the dataset.",
+            i18n.t("Profile the dataset."),
             "info",
             _inputs("Data"),
             (),
@@ -102,10 +113,10 @@ def build_widgets() -> list[WidgetDefinition]:
         WidgetDefinition(
             "rank",
             "data",
-            "Rank",
+            i18n.t("Rank"),
             True,
             RankScreen,
-            "Rank features.",
+            i18n.t("Rank features."),
             "rank",
             _inputs("Data"),
             _outputs("Scores"),
@@ -113,10 +124,10 @@ def build_widgets() -> list[WidgetDefinition]:
         WidgetDefinition(
             "edit-domain",
             "data",
-            "Edit Domain",
+            i18n.t("Edit Domain"),
             True,
             EditDomainScreen,
-            "Manage column roles.",
+            i18n.t("Manage column roles."),
             "edit",
             _inputs("Data"),
             _outputs("Data"),
@@ -124,10 +135,10 @@ def build_widgets() -> list[WidgetDefinition]:
         WidgetDefinition(
             "color",
             "data",
-            "Color",
+            i18n.t("Color"),
             True,
             ColorScreen,
-            "Assign color metadata.",
+            i18n.t("Assign color metadata."),
             "color",
             _inputs("Data"),
             _outputs("Data"),
@@ -135,10 +146,10 @@ def build_widgets() -> list[WidgetDefinition]:
         WidgetDefinition(
             "column-statistics",
             "data",
-            "Column Statistics",
+            i18n.t("Column Statistics"),
             True,
             ColumnStatisticsScreen,
-            "Deep dive into column distributions.",
+            i18n.t("Deep dive into column distributions."),
             "stats",
             _inputs("Data"),
             (),
@@ -146,10 +157,10 @@ def build_widgets() -> list[WidgetDefinition]:
         WidgetDefinition(
             "save-data",
             "data",
-            "Save Data",
+            i18n.t("Save Data"),
             True,
             SaveDataScreen,
-            "Export the current dataset.",
+            i18n.t("Export the current dataset."),
             "save",
             _inputs("Data"),
             (),
@@ -157,10 +168,10 @@ def build_widgets() -> list[WidgetDefinition]:
         WidgetDefinition(
             "select-columns",
             "transform",
-            "Select Columns",
+            i18n.t("Select Columns"),
             False,
             _placeholder_factory("Select Columns", "Transform widgets are planned but not part of this shell milestone."),
-            "Choose feature sets.",
+            i18n.t("Choose feature sets."),
             "columns",
             _inputs("Data"),
             _outputs("Data"),
@@ -168,10 +179,10 @@ def build_widgets() -> list[WidgetDefinition]:
         WidgetDefinition(
             "normalize",
             "transform",
-            "Normalize",
+            i18n.t("Normalize"),
             False,
             _placeholder_factory("Normalize", "Transform widgets are planned but not part of this shell milestone."),
-            "Scale numeric columns.",
+            i18n.t("Scale numeric columns."),
             "normalize",
             _inputs("Data"),
             _outputs("Data"),
@@ -179,10 +190,10 @@ def build_widgets() -> list[WidgetDefinition]:
         WidgetDefinition(
             "scatter-plot",
             "visualize",
-            "Scatter Plot",
+            i18n.t("Scatter Plot"),
             False,
             _placeholder_factory("Scatter Plot", "Visualization widgets will be integrated by a later group."),
-            "Explore points visually.",
+            i18n.t("Explore points visually."),
             "scatter",
             _inputs("Data"),
             (),
@@ -190,10 +201,10 @@ def build_widgets() -> list[WidgetDefinition]:
         WidgetDefinition(
             "linear-regression",
             "model",
-            "Linear Regression",
+            i18n.t("Linear Regression"),
             False,
             _placeholder_factory("Linear Regression", "Model widgets will be integrated by a later group."),
-            "Train a baseline model.",
+            i18n.t("Train a baseline model."),
             "model",
             _inputs("Data"),
             _outputs("Model"),
@@ -201,10 +212,10 @@ def build_widgets() -> list[WidgetDefinition]:
         WidgetDefinition(
             "test-score",
             "evaluate",
-            "Test & Score",
+            i18n.t("Test & Score"),
             False,
             _placeholder_factory("Test & Score", "Evaluation widgets will be integrated by a later group."),
-            "Measure model performance.",
+            i18n.t("Measure model performance."),
             "score",
             _inputs("Data", "Model"),
             _outputs("Scores"),
@@ -212,10 +223,10 @@ def build_widgets() -> list[WidgetDefinition]:
         WidgetDefinition(
             "pca",
             "unsupervised",
-            "PCA",
+            i18n.t("PCA"),
             False,
             _placeholder_factory("PCA", "Unsupervised widgets will be integrated by a later group."),
-            "Reduce dimensionality.",
+            i18n.t("Reduce dimensionality."),
             "pca",
             _inputs("Data"),
             _outputs("Data"),

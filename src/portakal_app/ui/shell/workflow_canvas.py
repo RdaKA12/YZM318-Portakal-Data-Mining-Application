@@ -427,6 +427,14 @@ class WorkflowNodeItem(QGraphicsObject):
         self.display_label = label or self.widget_definition.label
         self.update()
 
+    def update_widget_definition(self, widget_definition: WidgetDefinition) -> None:
+        previous_default_label = self.widget_definition.label
+        self.widget_definition = widget_definition
+        self._icon = get_widget_icon(widget_definition.icon_name)
+        if self.display_label == previous_default_label:
+            self.display_label = widget_definition.label
+        self.update()
+
     def center_anchor(self) -> QPointF:
         return self.mapToScene(self._body_rect().center())
 
@@ -614,6 +622,15 @@ class WorkflowScene(QGraphicsScene):
             self.statusMessage.emit(f"{widget_definition.label} added to the workflow.")
         self._notify_workflow_changed()
         return WorkflowNodeRecord(node.node_id, widget_id, node.display_label)
+
+    def update_widget_index(self, widget_index: dict[str, WidgetDefinition]) -> None:
+        self._widget_index = widget_index
+        for node in self._nodes.values():
+            widget_definition = widget_index.get(node.widget_definition.id)
+            if widget_definition is None:
+                continue
+            node.update_widget_definition(widget_definition)
+        self.update()
 
     def add_text_annotation(
         self,
@@ -1236,6 +1253,10 @@ class WorkflowCanvas(QGraphicsView):
         self.nodeDropped.emit(record.node_id)
         self.viewChanged.emit()
         return record
+
+    def update_widget_index(self, widget_index: dict[str, WidgetDefinition]) -> None:
+        self._scene.update_widget_index(widget_index)
+        self.viewport().update()
 
     def add_text_annotation(self) -> WorkflowTextAnnotationItem:
         center = self.viewport_scene_center()

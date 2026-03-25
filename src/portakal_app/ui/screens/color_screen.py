@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
 
 from portakal_app.data.models import DatasetHandle
 from portakal_app.data.services.color_settings_service import ColorSettingsService
+from portakal_app.ui import i18n
 from portakal_app.ui.screens.node_screen import WorkflowNodeScreenSupport
 
 
@@ -168,7 +169,7 @@ class ColorScreen(QWidget, WorkflowNodeScreenSupport):
 
         layout.addStretch(1)
 
-        self._auto_apply_checkbox = QCheckBox("Apply Automatically")
+        self._auto_apply_checkbox = QCheckBox("Send Automatically")
         self._auto_apply_checkbox.setChecked(True)
         layout.addWidget(self._auto_apply_checkbox)
 
@@ -187,7 +188,8 @@ class ColorScreen(QWidget, WorkflowNodeScreenSupport):
     def set_dataset(self, dataset: DatasetHandle | None) -> None:
         self._dataset = dataset
         self._output_dataset = None
-        self._dataset_label.setText(f"Dataset: {dataset.display_name if dataset is not None else 'none'}")
+        dataset_name = dataset.display_name if dataset is not None else i18n.t("none")
+        self._dataset_label.setText(i18n.tf("Dataset: {name}", name=dataset_name))
         self._state = self._service.build_state(dataset)
         self._render_state()
 
@@ -373,7 +375,7 @@ class ColorScreen(QWidget, WorkflowNodeScreenSupport):
             return
         path, _selected_filter = QFileDialog.getSaveFileName(
             self,
-            "Save Color Settings",
+            i18n.t("Save Color Settings"),
             "color-settings.json",
             "JSON Files (*.json);;All Files (*.*)",
         )
@@ -387,7 +389,7 @@ class ColorScreen(QWidget, WorkflowNodeScreenSupport):
             return
         path, _selected_filter = QFileDialog.getOpenFileName(
             self,
-            "Load Color Settings",
+            i18n.t("Load Color Settings"),
             "",
             "JSON Files (*.json);;All Files (*.*)",
         )
@@ -406,3 +408,7 @@ class ColorScreen(QWidget, WorkflowNodeScreenSupport):
             widget = item.widget()
             if widget is not None:
                 widget.deleteLater()
+
+    def refresh_translations(self) -> None:
+        dataset_name = self._dataset.display_name if self._dataset is not None else i18n.t("none")
+        self._dataset_label.setText(i18n.tf("Dataset: {name}", name=dataset_name))
